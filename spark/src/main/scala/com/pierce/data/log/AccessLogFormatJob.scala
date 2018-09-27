@@ -3,7 +3,7 @@ package com.pierce.data.log
 import com.pierce.data.log.util.DateUtil
 import org.apache.spark.sql.types._
 import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.{Row, SQLContext, SaveMode}
 
 object AccessLogFormatJob {
 
@@ -18,19 +18,30 @@ object AccessLogFormatJob {
         StructField("time", StringType) ::
         StructField("url", StringType) ::
         StructField("traffic", LongType) ::
+        StructField("day", StringType) ::
         StructField("ip", StringType) :: Nil
     )
 
     val rowRDD = accessLogRDD
       .map(_.split(" "))
-      .map(attributes => Row(
-        DateUtil.parseTime(attributes(3) + " " + attributes(4)),
-        attributes(11).replace("\"", ""),
-        attributes(9).toLong,
-        attributes(0)
-      ))
+      .map(attributes => {
+        val time = DateUtil.parseTime(attributes(3) + " " + attributes(4))
+        Row(
+          time,
+          attributes(11).replace("\"", ""),
+          attributes(9).toLong,
+          time.substring(0, 10).replace("-", ""),
+          attributes(0)
+      )})
     val accessDF = sqlContext.createDataFrame(rowRDD, schema)
-    accessDF.show()
+    accessDF.filter("url != '-'").show(false)
+    accessDF.coalesce(1)
+      .filter("url != '-'")
+      .write
+      .format("parquet")
+      .partitionBy("day")
+      .mode(SaveMode.Overwrite) //覆盖方式
+      .save("src/data/output")
     sc.stop()
   }
 }
